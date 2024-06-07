@@ -14,5 +14,10 @@ export class Admin {
 	otp: number;
 	@Prop()
 	access: string;
+
+	@Prop()
+	role_id: number;
+	@Prop()
+	role_name: string;
 }	
 export const AdminSchema = SchemaFactory.createForClass(Admin);

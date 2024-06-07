@@ -15,8 +15,8 @@ export class TokenService {
 		return newToken.save();
 	}
 
-	async getToken(token: string): Promise<any> {
-		const existingToken = await this.tokenModel.findOne({token: token}).exec();
+	async getToken(token: string, roleId : number): Promise<any> {
+		const existingToken = await this.tokenModel.findOne({token: token, roleId: roleId}).exec();
 		if (!existingToken) {
 			return false;
 		}

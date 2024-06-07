@@ -118,14 +118,17 @@ export class AuthController {
           .status(HttpStatus.BAD_REQUEST)
           .json({message:"Invalid username or password"});
       }
-      const payload = { username: req.body.userName, userId: result._id,access: result.access };
+      const payload = { username: req.body.userName, userId: result._id, access: result.role_name };
       const token = await jwt.sign(payload, jwtSecret, { expiresIn: "24h" });
-      let newToken = await this.tokenService.createToken({ token });
+      const roleId = result.role_id;
+      await this.tokenService.createToken({ token, roleId });
       return response.json({
         token: token,
         userId: result._id,
+        roleId: result.role_id,
         message: "Admin logged in successfully",
       });
+
     } catch (err) {
       if (err.response) {
         return response.status(HttpStatus.BAD_REQUEST).json(err.response);
@@ -286,15 +289,12 @@ export class AuthController {
       const option = req.body.option;
       const from_date = req.body.from_date;
       const to_date = req.body.to_date;
-      const address = null;
       const transactionData = await this.transactionService.getSaleGraphValue(
-        address,
         option,
         from_date,
         to_date
       );
       const totalToken = await this.transactionService.getSaleGraphTotalToken(
-        address,
         from_date,
         to_date
       );
@@ -328,15 +328,12 @@ export class AuthController {
       const option = req.body.option;
       const from_date = req.body.from_date;
       const to_date = req.body.to_date;
-      const address = null;
       const transactionData = await this.transactionService.getLineGraphValue(
-        address,
         option,
         from_date,
         to_date
       );
       const totalToken = await this.transactionService.getLineGraphTotalToken(
-        address,
         from_date,
         to_date
       );
@@ -368,14 +365,13 @@ export class AuthController {
   async getTotalMid(@Req() req: any, @Res() response) {
     try {
       const totalAmount = await this.transactionService.getTotalMid();
-      var today = moment.utc().format();
-      var lastWeekStartDate = moment
+      const today = moment.utc().format();
+      const lastWeekStartDate = moment
         .utc()
         .subtract(1, "weeks")
         .startOf("week")
         .format();
-      const sinceLastWeekSale =
-        await this.transactionService.getTransactionCountBasedDate(
+      const sinceLastWeekSale = await this.transactionService.getTransactionCountBasedDate(
           lastWeekStartDate,
           today
         );
@@ -390,4 +386,5 @@ export class AuthController {
       });
     }
   }
+  
 }

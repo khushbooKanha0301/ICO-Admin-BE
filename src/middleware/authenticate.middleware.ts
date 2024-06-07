@@ -2,7 +2,7 @@ import { NestMiddleware, Injectable, HttpException, HttpStatus, Logger } from "@
 import { NextFunction, Request, Response } from "express";
 import { TokenService } from "src/service/token/token.service";
 const jwtSecret = 'eplba'
-var jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 
 @Injectable()
 export class AuthenticateMiddleware implements NestMiddleware {
@@ -13,13 +13,18 @@ export class AuthenticateMiddleware implements NestMiddleware {
 	async use(req: Request, res: Response, next: NextFunction) {
 		try {
 			const authHeader = req.headers['authorization']
+            const roleId = req.headers['roleid'];
+           
+			if (!authHeader || !roleId) {
+				throw new HttpException('Authorization Token or Role ID not found', HttpStatus.UNAUTHORIZED);
+			}
+
 			const token = authHeader && authHeader.split(' ')[1]
 			if (token == null) {
-				// throw 'NotProvideToken'
-				// throw new HttpException('Authorization Token not found', HttpStatus.UNAUTHORIZED)
+				throw new HttpException('Authorization Token not found', HttpStatus.UNAUTHORIZED);
 			}
 			
-			const isExistingToken = await this.tokenService.getToken(token);
+			const isExistingToken = await this.tokenService.getToken(token, Number(roleId));
 			if (!isExistingToken && req.method !== "POST" && req.originalUrl !== "/login") {
 				return res.status(HttpStatus.UNAUTHORIZED).json({ message: "Authorization Token not valid."});
 			}

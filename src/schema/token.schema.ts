@@ -4,5 +4,8 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 export class Token {
 	@Prop()
 	token: string;
+
+	@Prop()
+	roleId: number;
 }	
 export const TokenSchema = SchemaFactory.createForClass(Token);

@@ -2,15 +2,15 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { ITransaction } from "src/interface/transactions.interface";
 import { Model } from "mongoose";
-import { ConfigService } from "@nestjs/config";
 import * as moment from "moment";
+import { ISales } from "src/interface/sales.interface";
 
 @Injectable()
 export class TransactionsService {
   
   constructor(
     @InjectModel("transaction") private transactionModel: Model<ITransaction>,
-    private configService: ConfigService
+    @InjectModel("sales") private salesModel: Model<ISales>
   ) {}
 
   async getTransaction(
@@ -30,7 +30,7 @@ export class TransactionsService {
         transactionsQuery = transactionsQuery.where({
           $expr: {
             $regexMatch: {
-              input: { $toString: "$tran_id" },
+              input: { $toString: "$transactionHash" },
               regex: regexQuery,
               options: "i",
             },
@@ -42,7 +42,6 @@ export class TransactionsService {
     if (statusFilter !== "All" && statusFilter !== null) {
       transactionsQuery = transactionsQuery.where({ status: statusFilter });
     }
-
     if (types && types.length > 0) {
       transactionsQuery = transactionsQuery.where({ source: { $in: types } });
     }
@@ -55,9 +54,8 @@ export class TransactionsService {
     }
 
     const transactions = await transactionsQuery
-      .select("-__v -do_not_convert -orderable_type -wallet_address -lightning_network -underpaid_amount -overpaid_amount -is_refundable -refunds -voids -fees -payment_url -token -orderable_id")
-      .sort({ created_at: "desc" })
-      .exec();
+    .sort({ created_at: "desc" })
+    .exec();
 
     if (!transactions) {
       throw new NotFoundException(`Transactions not found`);
@@ -68,7 +66,7 @@ export class TransactionsService {
 
   async getTransactionByWalletAdd(address?: string): Promise<any> {
     let transactionsQuery = this.transactionModel.find({
-      wallet_address: address,
+      user_wallet_address: address,
     });
 
     const transactions = await transactionsQuery.exec();
@@ -103,28 +101,41 @@ export class TransactionsService {
   }
 
   async getTotalMid() {
-    const midCountResult = await this.transactionModel
-      .aggregate([
-        {
-          $match: {
-            status: {
-              $in: ["new", "paid", "pending", "confirming"],
-            },
-          },
+    const midCountResult = await this.transactionModel.aggregate([
+      {
+        $match: {
+          status: "paid"
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $toDouble: "$token_cryptoAmount" }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $round: ["$total", 2] },
         },
-        {
-          $group: {
-            _id: null,
-            total: {
-              $sum: { $toDouble: "$token_cryptoAmount" },
-            },
-          },
-        },
-      ])
-      .exec();
-    return midCountResult && midCountResult[0]?.total
-      ? midCountResult[0]?.total
-      : 0;
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $first: "$totalAmount" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $ifNull: ["$totalAmount", 0] }
+        }
+      }
+    ]).exec();
+  
+    return (midCountResult && midCountResult[0]?.totalAmount)? midCountResult[0].totalAmount: 0;
   }
 
   async getTransactionCount(
@@ -143,7 +154,7 @@ export class TransactionsService {
         transactionsQuery = transactionsQuery.where({
           $expr: {
             $regexMatch: {
-              input: { $toString: "$tran_id" },
+              input: { $toString: "$transactionHash" },
               regex: regexQuery,
               options: "i",
             },
@@ -166,15 +177,14 @@ export class TransactionsService {
     return count;
   }
 
-  async getTransactionByOredrId(orderId): Promise<any> {
+  async getTransactionByOredrId(orderId: string): Promise<any> {
     const transaction = this.transactionModel
-      .findOne({ tran_id: orderId })
+    .findOne({ transactionHash: orderId })
       .exec();
     return transaction;
   }
 
   async getSaleGraphValue(
-    address,
     filterType: any,
     from_date: any,
     to_date: any
@@ -182,17 +192,11 @@ export class TransactionsService {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
+   
     const transactions = await this.transactionModel
       .aggregate([
         {
@@ -324,24 +328,16 @@ export class TransactionsService {
   }
 
   async getLineGraphTotalToken(
-    address: any,
     from_date: any,
     to_date: any
   ): Promise<any> {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
 
     let totalToken = await this.transactionModel
       .aggregate([
@@ -350,7 +346,7 @@ export class TransactionsService {
         },
         {
           $group: {
-            _id: address ? "$wallet_address" : null,
+            _id: null,
             totalToken: { $sum: 1 },
           },
         },
@@ -362,7 +358,6 @@ export class TransactionsService {
   }
 
   async getLineGraphValue(
-    address,
     filterType: any,
     from_date: any,
     to_date: any
@@ -370,17 +365,10 @@ export class TransactionsService {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
     const transactions = await this.transactionModel
       .aggregate([
         {
@@ -510,24 +498,16 @@ export class TransactionsService {
   }
 
   async getSaleGraphTotalToken(
-    address: any,
     from_date: any,
     to_date: any
   ): Promise<any> {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
 
     let totalToken = await this.transactionModel
       .aggregate([
@@ -536,7 +516,7 @@ export class TransactionsService {
         },
         {
           $group: {
-            _id: address ? "$wallet_address" : null,
+            _id: null,
             totalToken: { $sum: 1 },
           },
         },
@@ -547,36 +527,26 @@ export class TransactionsService {
     return totalToken;
   }
 
-  async getTokenCount(address?: string) {
+  async getTokenCount() {
     let whereQuery: {
       status: any;
-      wallet_address?: any;
     } = {
-      status: {
-        $in: ["new", "paid", "pending", "confirming"],
-      },
+      status: "paid"
     };
-    if (address) {
-      whereQuery = {
-        ...whereQuery,
-        wallet_address: address,
-      };
-    }
-    const tokenCountResult = await this.transactionModel
-      .aggregate([
-        {
-          $match: whereQuery,
-        },
-        {
-          $group: {
-            _id: "$price_currency",
-            total: {
-              $sum: { $toDouble: "$token_cryptoAmount" },
-            },
-          },
-        },
-      ])
-      .exec();
+
+    const tokenCountResult = await this.transactionModel.aggregate([
+      {
+        $match:whereQuery
+      },
+      {
+        $group: {
+          _id: '$price_currency',
+          total: {
+            $sum: { $toDouble: "$token_cryptoAmount" }
+          }
+        }
+      },
+    ]).exec();
     return tokenCountResult;
   }
 
@@ -588,5 +558,18 @@ export class TransactionsService {
       },
     });
     return transactionCount ? transactionCount : 0;
+  }
+
+  async getSales(){
+    return await this.salesModel.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $toDouble: "$total_token" }
+          }
+        }
+      },
+    ]).exec();
   }
 }

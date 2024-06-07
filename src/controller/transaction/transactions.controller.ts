@@ -79,13 +79,11 @@ export class TransactionsController {
       const from_date = req.body.from_date;
       const to_date = req.body.to_date;
       const transactionData = await this.transactionService.getSaleGraphValue(
-        req.headers.authData.verifiedAddress,
         option,
         from_date,
         to_date
       );
       const totalToken = await this.transactionService.getSaleGraphTotalToken(
-        req.headers.authData.verifiedAddress,
         from_date,
         to_date
       );
@@ -120,13 +118,11 @@ export class TransactionsController {
       const from_date = req.body.from_date;
       const to_date = req.body.to_date;
       const transactionData = await this.transactionService.getLineGraphValue(
-        req.headers.authData.verifiedAddress,
         option,
         from_date,
         to_date
       );
       const totalToken = await this.transactionService.getLineGraphTotalToken(
-        req.headers.authData.verifiedAddress,
         from_date,
         to_date
       );
@@ -190,18 +186,27 @@ export class TransactionsController {
   @Get("/getTokenCount")
   async getTokenCount(@Req() req: any, @Res() response) {
     try {
-      let currencyData = await this.transactionService.getTokenCount(
-        req.headers.authData.verifiedAddress
-      );
+      let currencyData = await this.transactionService.getTokenCount();
+
       currencyData = currencyData.map((obj) => {
         return { [obj._id]: obj.total };
       });
       currencyData = Object.assign({}, ...currencyData);
+      
+      const totalCount = (currencyData["GBP"] ? parseFloat(currencyData["GBP"]) : 0.00) +
+      (currencyData["AUD"] ? parseFloat(currencyData["AUD"]) : 0.00) +
+      (currencyData["EUR"] ? parseFloat(currencyData["EUR"]) : 0.00) +
+      (currencyData["USD"] ? parseFloat(currencyData["USD"]) : 0.00);
+
+
       const tokenData = {
         gbpCount: currencyData["GBP"] ? currencyData["GBP"].toFixed(2) : "0.00",
         audCount: currencyData["AUD"] ? currencyData["AUD"].toFixed(2) : "0.00",
         eurCount: currencyData["EUR"] ? currencyData["EUR"].toFixed(2) : "0.00",
+        usdCount: currencyData["USD"] ? currencyData["USD"].toFixed(2) : "0.00",
+        totalUserCount : totalCount
       };
+     
       if (tokenData) {
         return response.status(HttpStatus.OK).json({
           message: "get TotalAmount Amount Successfully",
@@ -249,6 +254,28 @@ export class TransactionsController {
     } catch (err) {
       return response.status(HttpStatus.BAD_REQUEST).json({
         message: "Something went wrong",
+      });
+    }
+  }
+
+  /**
+   * 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
+  @Get("/checkSale")
+  async checkSale(@Req() req: any, @Res() response) {
+    const sales = await this.transactionService.getSales()
+    if (sales) { 
+      return response.status(HttpStatus.OK).json({
+        message: "Sales get successfully",
+        sales: sales[0]
+      });
+    } else {
+      return response.status(HttpStatus.OK).json({
+        message: "Sale Not Found",
+        sales: null
       });
     }
   }

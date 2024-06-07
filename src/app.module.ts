@@ -19,6 +19,7 @@ import { HandlebarsAdapter } from "@nestjs-modules/mailer/dist/adapters/handleba
 import { TransactionsController } from "./controller/transaction/transactions.controller";
 import { TransactionsService } from "./service/transaction/transactions.service";
 import { TransactionSchema } from "./schema/transaction.schema";
+import { SalesSchema } from "./schema/sales.schema";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
 import { CustomThrottleMiddleware } from "./middleware/custom-throttle.middleware";
@@ -28,6 +29,7 @@ import { CustomThrottleMiddleware } from "./middleware/custom-throttle.middlewar
     MongooseModule.forRoot("mongodb://127.0.0.1:27017/ico"),
     MongooseModule.forFeature([{ name: "user", schema: UserSchema }]),
     MongooseModule.forFeature([{ name: "token", schema: TokenSchema }]),
+    MongooseModule.forFeature([{ name: "sales", schema: SalesSchema }]),
     MongooseModule.forFeature([{ name: "admin", schema: AdminSchema }]),
     MongooseModule.forFeature([
       { name: "transaction", schema: TransactionSchema },

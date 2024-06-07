@@ -3,4 +3,7 @@ export class CreateTokenDto {
 	@IsOptional()
 	@IsString()
 	token: string;
+
+	@IsOptional()
+	roleId: number;
 }

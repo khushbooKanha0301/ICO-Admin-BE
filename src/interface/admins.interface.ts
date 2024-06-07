@@ -7,4 +7,6 @@ export interface IAdmin extends Document{
     readonly password: string;
     readonly otp: number;
     readonly access: string;
+    readonly role_id: number;
+    readonly role_name: string;
 }
