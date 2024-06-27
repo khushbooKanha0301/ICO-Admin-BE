@@ -187,33 +187,32 @@ export class TransactionsController {
   async getTokenCount(@Req() req: any, @Res() response) {
     try {
       let currencyData = await this.transactionService.getTokenCount();
-
+      
       currencyData = currencyData.map((obj) => {
         return { [obj._id]: obj.total };
       });
       currencyData = Object.assign({}, ...currencyData);
-      
-      const totalCount = (currencyData["GBP"] ? parseFloat(currencyData["GBP"]) : 0.00) +
-      (currencyData["AUD"] ? parseFloat(currencyData["AUD"]) : 0.00) +
-      (currencyData["EUR"] ? parseFloat(currencyData["EUR"]) : 0.00) +
-      (currencyData["USD"] ? parseFloat(currencyData["USD"]) : 0.00);
+      const totalUserCount = currencyData["USDT"] ? currencyData["USDT"].toFixed(2) : "0.00"
 
+      let usdtData = await this.transactionService.getUsdtCount();
 
-      const tokenData = {
-        gbpCount: currencyData["GBP"] ? currencyData["GBP"].toFixed(2) : "0.00",
-        audCount: currencyData["AUD"] ? currencyData["AUD"].toFixed(2) : "0.00",
-        eurCount: currencyData["EUR"] ? currencyData["EUR"].toFixed(2) : "0.00",
-        usdCount: currencyData["USD"] ? currencyData["USD"].toFixed(2) : "0.00",
-        totalUserCount : totalCount
-      };
-     
-      if (tokenData) {
+      usdtData = usdtData.map((obj) => {
+        return { [obj._id]: obj.total };
+      });
+      usdtData = Object.assign({}, ...usdtData);  
+      const totalUsdtCount = usdtData["USDT"] ? usdtData["USDT"].toFixed(2) : "0.00";
+      const totalTokenCount = {
+        totalUserCount: totalUserCount,
+        totalUsdtCount: totalUsdtCount
+      }
+
+      if (totalUserCount) {
         return response.status(HttpStatus.OK).json({
           message: "get TotalAmount Amount Successfully",
-          tokenData: tokenData,
+          totalTokenCount: totalTokenCount,
         });
       } else {
-        return response.status(HttpStatus.OK).json({
+        return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Something went wrong",
         });
       }

@@ -48,6 +48,7 @@ export class TransactionsService {
     if (status && status.length > 0) {
       transactionsQuery = transactionsQuery.where({ status: { $in: status } });
     }
+    
     if (page && pageSize) {
       const skipCount = (page - 1) * pageSize;
       transactionsQuery = transactionsQuery.skip(skipCount).limit(pageSize);
@@ -83,6 +84,7 @@ export class TransactionsService {
         {
           $match: {
             status: "paid",
+            is_sale: true
           },
         },
         {
@@ -104,7 +106,8 @@ export class TransactionsService {
     const midCountResult = await this.transactionModel.aggregate([
       {
         $match: {
-          status: "paid"
+          status: "paid",
+          is_sale: true
         }
       },
       {
@@ -172,7 +175,7 @@ export class TransactionsService {
     if (types && types.length > 0) {
       transactionsQuery = transactionsQuery.where({ source: { $in: types } });
     }
-
+    
     const count = await transactionsQuery.countDocuments();
     return count;
   }
@@ -191,9 +194,11 @@ export class TransactionsService {
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
    
@@ -333,9 +338,11 @@ export class TransactionsService {
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
 
@@ -364,9 +371,11 @@ export class TransactionsService {
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     const transactions = await this.transactionModel
@@ -502,10 +511,12 @@ export class TransactionsService {
     to_date: any
   ): Promise<any> {
     let woToken: {
-      status: string;
+      status: string,
+      is_sale: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
 
@@ -530,8 +541,10 @@ export class TransactionsService {
   async getTokenCount() {
     let whereQuery: {
       status: any;
+      is_sale: boolean;
     } = {
-      status: "paid"
+      status: "paid",
+      is_sale: true
     };
 
     const tokenCountResult = await this.transactionModel.aggregate([
@@ -543,6 +556,31 @@ export class TransactionsService {
           _id: '$price_currency',
           total: {
             $sum: { $toDouble: "$token_cryptoAmount" }
+          }
+        }
+      },
+    ]).exec();
+    return tokenCountResult;
+  }
+
+  async getUsdtCount() {
+    let whereQuery: {
+      status: any;
+      is_sale: boolean;
+    } = {
+      status: "paid",
+      is_sale: true
+    };
+   
+    const tokenCountResult = await this.transactionModel.aggregate([
+      {
+        $match:whereQuery
+      },
+      {
+        $group: {
+          _id: '$price_currency',
+          total: {
+            $sum: { $toDouble: "$price_amount" }
           }
         }
       },

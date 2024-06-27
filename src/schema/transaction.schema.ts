@@ -1,8 +1,7 @@
-import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose"
 @Schema()
 export class Transaction {
-  @Prop()
+	@Prop()
 	transactionHash: string;
 
 	@Prop()
@@ -13,12 +12,15 @@ export class Transaction {
 
 	@Prop()
 	receiver_wallet_address: string;
+
+	@Prop()
+	network: string;
 	
 	@Prop()
 	price_currency: string;
 
 	@Prop()
-	receive_currency: string;
+	is_sale: boolean;
 
 	@Prop()
 	price_amount: string;
@@ -51,6 +53,9 @@ export class Transaction {
 	source: string;
 
 	@Prop()
-	usd_amount: string;
-}
+	sale_name: string;
+
+	@Prop()
+	sale_type: string;
+}	
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);

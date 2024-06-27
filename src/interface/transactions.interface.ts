@@ -5,8 +5,9 @@ export interface ITransaction extends Document {
     readonly status: string;
     readonly user_wallet_address: string;
     readonly receiver_wallet_address: string;
+    readonly network: string;
     readonly price_currency: string;
-    readonly receive_currency: string;
+    readonly is_sale: boolean;
     readonly price_amount: string;
     readonly token_cryptoAmount : string;
     readonly gasUsed : string;
@@ -17,5 +18,6 @@ export interface ITransaction extends Document {
     readonly source : string;
     readonly created_at: string;
     readonly paid_at: string;
-    readonly usd_amount: string; 
+    readonly sale_name: string; 
+    readonly sale_type: string;
 }
