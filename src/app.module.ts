@@ -13,6 +13,7 @@ import { TokenService } from "./service/token/token.service";
 import { TokenSchema } from "./schema/token.schema";
 import { AdminService } from "./service/admin/admin.service";
 import { AdminSchema } from "./schema/admin.schema";
+import { PermissionSchema } from "./schema/permission.schema";
 import { MailerModule } from "@nestjs-modules/mailer";
 import { join } from "path";
 import { HandlebarsAdapter } from "@nestjs-modules/mailer/dist/adapters/handlebars.adapter";
@@ -31,6 +32,7 @@ import { CustomThrottleMiddleware } from "./middleware/custom-throttle.middlewar
     MongooseModule.forFeature([{ name: "token", schema: TokenSchema }]),
     MongooseModule.forFeature([{ name: "sales", schema: SalesSchema }]),
     MongooseModule.forFeature([{ name: "admin", schema: AdminSchema }]),
+    MongooseModule.forFeature([{ name: "permission", schema: PermissionSchema }]),
     MongooseModule.forFeature([
       { name: "transaction", schema: TransactionSchema },
     ]),

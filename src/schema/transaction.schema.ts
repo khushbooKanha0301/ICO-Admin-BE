@@ -23,6 +23,9 @@ export class Transaction {
 	is_sale: boolean;
 
 	@Prop()
+	is_process: boolean;
+
+	@Prop()
 	price_amount: string;
 
 	@Prop()

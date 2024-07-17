@@ -66,8 +66,10 @@ export class TransactionsService {
   }
 
   async getTransactionByWalletAdd(address?: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
+
     let transactionsQuery = this.transactionModel.find({
-      user_wallet_address: address,
+      user_wallet_address: caseInsensitiveAddress
     });
 
     const transactions = await transactionsQuery.exec();
@@ -84,7 +86,8 @@ export class TransactionsService {
         {
           $match: {
             status: "paid",
-            is_sale: true
+            is_sale: true,
+            is_process : true
           },
         },
         {
@@ -107,7 +110,8 @@ export class TransactionsService {
       {
         $match: {
           status: "paid",
-          is_sale: true
+          is_sale: true,
+          is_process: true
         }
       },
       {
@@ -116,6 +120,50 @@ export class TransactionsService {
           total: {
             $sum: { $toDouble: "$token_cryptoAmount" }
           }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $round: ["$total", 2] },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $first: "$totalAmount" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $ifNull: ["$totalAmount", 0] }
+        }
+      }
+    ]).exec();
+  
+    return (midCountResult && midCountResult[0]?.totalAmount)? midCountResult[0].totalAmount: 0;
+  }
+
+  async getTotalMidByAddress(address: string) {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
+    const midCountResult = await this.transactionModel.aggregate([
+      {
+        $match: {
+          status: "paid",
+          is_sale: true,
+          sale_type: "outside-website",
+          is_process: false,
+          user_wallet_address: caseInsensitiveAddress
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $toDouble: "$token_cryptoAmount" }
+          },
+
         }
       },
       {
@@ -195,10 +243,12 @@ export class TransactionsService {
     let woToken: {
       status: string;
       is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
    
@@ -339,10 +389,12 @@ export class TransactionsService {
     let woToken: {
       status: string;
       is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
 
@@ -372,10 +424,12 @@ export class TransactionsService {
     let woToken: {
       status: string;
       is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     const transactions = await this.transactionModel
@@ -513,10 +567,12 @@ export class TransactionsService {
     let woToken: {
       status: string,
       is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
 
@@ -542,9 +598,11 @@ export class TransactionsService {
     let whereQuery: {
       status: any;
       is_sale: boolean;
+      is_process: boolean,
     } = {
       status: "paid",
-      is_sale: true
+      is_sale: true,
+      is_process: true
     };
 
     const tokenCountResult = await this.transactionModel.aggregate([
@@ -567,9 +625,11 @@ export class TransactionsService {
     let whereQuery: {
       status: any;
       is_sale: boolean;
+      is_process: boolean,
     } = {
       status: "paid",
-      is_sale: true
+      is_sale: true,
+      is_process: true
     };
    
     const tokenCountResult = await this.transactionModel.aggregate([
@@ -609,5 +669,17 @@ export class TransactionsService {
         }
       },
     ]).exec();
+  }
+
+  async getCurrentSales() {
+    const currentDate = moment.utc().format();
+    return await this.salesModel
+      .findOne({
+        $and: [
+          { start_sale: { $lte: currentDate } },
+          { end_sale: { $gte: currentDate } },
+        ],
+      })
+    .exec();
   }
 }

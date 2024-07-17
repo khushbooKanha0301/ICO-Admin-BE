@@ -12,6 +12,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { UserService } from "src/service/user/users.service";
+import { TransactionsService } from "src/service/transaction/transactions.service";
 import { ConfigService } from "@nestjs/config";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
@@ -21,6 +22,7 @@ import { IAdmin } from "src/interface/admins.interface";
 import { ITransaction } from "src/interface/transactions.interface";
 import { UpdateAccountSettingsDto } from "src/dto/update-account-settings.dto";
 import { SkipThrottle } from "@nestjs/throttler";
+import { ISales } from "src/interface/sales.interface";
 const moment = require("moment");
 const rp = require("request-promise-native");
 
@@ -30,17 +32,20 @@ export class UsersController {
   constructor(
     private readonly userService: UserService,
     private readonly configService: ConfigService,
-    @InjectModel("user") private userModel: Model<IUser>,
+    private readonly transactionService: TransactionsService,
     private readonly mailerService: MailerService,
+    @InjectModel("user") private userModel: Model<IUser>,
+    @InjectModel("sales") private salesModel: Model<ISales>,
     @InjectModel("admin") private adminModel: Model<IAdmin>,
-    @InjectModel("transaction") private transactionModel: Model<ITransaction>
+    @InjectModel("transaction") private transactionModel: Model<ITransaction>,
+
   ) {}
 
   /**
    * This API endpoint is used to retrives all the user list
-   * @param req 
-   * @param response 
-   * @returns 
+   * @param req
+   * @param response
+   * @returns
    */
   @Get("/userList")
   async userList(@Req() req: any, @Res() response) {
@@ -128,9 +133,9 @@ export class UsersController {
 
   /**
    * This API endpoint is used to retrives all the KYC user list
-   * @param req 
-   * @param response 
-   * @returns 
+   * @param req
+   * @param response
+   * @returns
    */
   @Get("/kycUserList")
   async kycUserList(@Req() req: any, @Res() response) {
@@ -165,13 +170,13 @@ export class UsersController {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
-  
+
   /**
-   * This API endpoint is used to accept the kyc 
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   * This API endpoint is used to accept the kyc
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @SkipThrottle(false)
   @Get("/acceptKyc/:id")
@@ -186,12 +191,10 @@ export class UsersController {
       if (!userData) {
         throw new NotFoundException(`KYC not found`);
       }
-      if(userData?.is_kyc_deleted)
-      {
-        throw new BadRequestException("KYC not found")
+      if (userData?.is_kyc_deleted) {
+        throw new BadRequestException("KYC not found");
       }
-      if(userData?.is_verified === 1)
-      {
+      if (userData?.is_verified === 1) {
         throw new BadRequestException("User's KYC already Approved");
       }
       if (userData?.is_verified === 2) {
@@ -203,6 +206,30 @@ export class UsersController {
           { is_verified: 1, admin_checked_at: currentDate }
         )
         .exec();
+      const updateData = await this.userModel.findById(param.id);
+      if (
+        updateData &&
+        updateData.kyc_completed &&
+        updateData.is_verified === 1
+      ) {
+        const midCountResult = await this.transactionService.getTotalMidByAddress(updateData.wallet_address)
+        if(midCountResult){
+          const currentSales = await this.transactionService.getCurrentSales()
+          const userPurchaseMid = Number(midCountResult.toFixed(2)) + currentSales.user_purchase_token;
+          const remainingMid = currentSales.total_token - userPurchaseMid;
+          const updatedSalevalues = {
+            $set: {
+              user_purchase_token: parseFloat(userPurchaseMid.toFixed(2)),
+              remaining_token: parseFloat(remainingMid.toFixed(2)),
+            },
+          };
+          await this.salesModel.updateOne(
+            { _id: currentSales?._id },
+            updatedSalevalues
+          );
+          await this.transactionModel.updateOne({user_wallet_address:updateData.wallet_address }, {is_process: true});
+        }
+      }
       if (!users) {
         throw new NotFoundException(`Users not found`);
       }
@@ -216,11 +243,11 @@ export class UsersController {
   }
 
   /**
-   *  This API endpoint is used to reject kyc 
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   *  This API endpoint is used to reject kyc
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @SkipThrottle(false)
   @Post("/rejectKyc/:id")
@@ -234,12 +261,10 @@ export class UsersController {
       if (!user) {
         throw new NotFoundException(`KYC not found`);
       }
-      if(user?.is_kyc_deleted)
-      {
-        throw new BadRequestException("KYC not found")
+      if (user?.is_kyc_deleted) {
+        throw new BadRequestException("KYC not found");
       }
-      if(user?.is_verified === 1)
-      {
+      if (user?.is_verified === 1) {
         throw new BadRequestException("User's KYC already Approved");
       }
       if (user?.is_verified === 2) {
@@ -253,17 +278,19 @@ export class UsersController {
         )
         .exec();
       if (user.email) {
-        this.mailerService.sendMail({
-          to: user?.email,
-          subject: "Middn :: Your KYC has been rejected",
-          template: "message",
-          context: {
-            title: "Sorry !!! Your KYC has been Rejected",
-            message: req.body.message ? req.body.message : "Reason not added",
-          },
-        }).catch((error)=>{
-          console.log(error);
-        });
+        this.mailerService
+          .sendMail({
+            to: user?.email,
+            subject: "Middn :: Your KYC has been rejected",
+            template: "message",
+            context: {
+              title: "Sorry !!! Your KYC has been Rejected",
+              message: req.body.message ? req.body.message : "Reason not added",
+            },
+          })
+          .catch((error) => {
+            console.log(error);
+          });
       }
       if (!users) {
         throw new NotFoundException(`Users not found`);
@@ -278,11 +305,11 @@ export class UsersController {
   }
 
   /**
-   *  This API endpoint is used to Suspend user 
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   *  This API endpoint is used to Suspend user
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @SkipThrottle(false)
   @Post("/suspendUser/:id")
@@ -292,6 +319,22 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
+      const userId = req.headers['userid'];
+      const fetchUser = await this.adminModel
+      .findOne({ _id: userId })
+      .select("id permissions role_id");
+      if (fetchUser?.role_id === 3) {
+        const hasPermission = fetchUser?.permissions?.some(
+          (permission) => permission.permission_id === 1
+        );
+
+        if (!hasPermission) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "You don't have permission to Suspend User",
+          });
+        }
+      }
+
       const user = await this.userModel.findById(param.id).exec();
       if (!user) {
         throw new NotFoundException(`User not found`);
@@ -312,11 +355,11 @@ export class UsersController {
   }
 
   /**
-   * This API endpoint is used to twoFA user disable 
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   * This API endpoint is used to twoFA user disable
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @SkipThrottle(false)
   @Post("/twoFADisableUser/:id")
@@ -333,7 +376,7 @@ export class UsersController {
       if (user.is_2FA_enabled === false) {
         return response
           .status(HttpStatus.BAD_REQUEST)
-          .json({message:"This user's 2FA already disabled"});
+          .json({ message: "This user's 2FA already disabled" });
       }
       user.is_2FA_enabled = false;
       user.is_2FA_login_verified = true;
@@ -350,10 +393,10 @@ export class UsersController {
 
   /**
    * This Api endpoint is used to active user
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @SkipThrottle(false)
   @Post("/activeUser/:id")
@@ -385,10 +428,10 @@ export class UsersController {
 
   /**
    * This Api endpoint is used to delete user
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @SkipThrottle(false)
   @Get("/deleteUser/:id")
@@ -398,6 +441,22 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
+      const userId = req.headers['userid'];
+      const fetchUser = await this.adminModel
+      .findOne({ _id: userId })
+      .select("id permissions role_id");
+      if (fetchUser?.role_id === 3) {
+        const hasPermission = fetchUser?.permissions?.some(
+          (permission) => permission.permission_id === 2
+        );
+
+        if (!hasPermission) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "You don't have permission to Delete User",
+          });
+        }
+      }
+      
       const userData = await this.userModel.findById(param.id);
       if (!userData) {
         throw new NotFoundException(`User already Deleted`);
@@ -417,10 +476,10 @@ export class UsersController {
 
   /**
    * This Api endpoint is used to delete KYC.
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @SkipThrottle(false)
   @Get("/deleteKyc/:id")
@@ -430,14 +489,31 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
-      const userData = await this.userModel.findById(param.id);
-      if(!userData)
-      {
-        throw new NotFoundException(`KYC not found`);
+      const userId = req.headers['userid'];
+      const fetchUser = await this.adminModel
+      .findOne({ _id: userId })
+      .select("id permissions role_id");
+      if (fetchUser?.role_id === 3) {
+        const hasPermission = fetchUser?.permissions?.some(
+          (permission) => permission.permission_id === 3
+        );
+
+        if (!hasPermission) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "You don't have permission to Delete User KYC",
+          });
+        }
       }
+
+      const userData = await this.userModel.findById(param.id);
+      if (!userData) {
+        throw new NotFoundException(`KYC Not Found`);
+      }
+
       if (userData?.is_kyc_deleted === true) {
         throw new BadRequestException(`User's KYC already deleted`);
       }
+
       const user = await this.userModel
         .findByIdAndUpdate(
           param.id,
@@ -466,17 +542,18 @@ export class UsersController {
       return response.status(HttpStatus.OK).json({
         message: "User KYC deleted successfully...",
       });
+
     } catch (err) {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
 
   /**
-   * This Api endpoint is used to view users 
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   * This Api endpoint is used to view users
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @Get("/viewUser/:id")
   async viewUser(
@@ -485,7 +562,12 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
-      const user = await this.userModel.findById(param.id).select("-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret").exec();
+      const user = await this.userModel
+        .findById(param.id)
+        .select(
+          "-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret"
+        )
+        .exec();
       if (!user) {
         throw new NotFoundException(`User not found`);
       }
@@ -523,10 +605,10 @@ export class UsersController {
 
   /**
    * This Api endpoint is used to view KYC by id
-   * @param req 
-   * @param response 
-   * @param param 
-   * @returns 
+   * @param req
+   * @param response
+   * @param param
+   * @returns
    */
   @Get("/viewKyc/:id")
   async viewKyc(
@@ -535,7 +617,12 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
-      const user = await this.userModel.findById(param.id).select("-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret").exec();
+      const user = await this.userModel
+        .findById(param.id)
+        .select(
+          "-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret"
+        )
+        .exec();
       if (!user) {
         throw new NotFoundException(`KYC not found`);
       }
@@ -576,9 +663,9 @@ export class UsersController {
 
   /**
    * This Api endpoint is used to reset password
-   * @param response 
-   * @param req 
-   * @returns 
+   * @param response
+   * @param req
+   * @returns
    */
   @Post("/changePassword")
   async resetPassword(@Res() response, @Req() req: any) {
@@ -608,9 +695,9 @@ export class UsersController {
 
   /**
    * This Api endpoint is used to get users count
-   * @param response 
-   * @param req 
-   * @returns 
+   * @param response
+   * @param req
+   * @returns
    */
   @Get("/getUsersCount")
   async getUsersCount(@Res() response, @Req() req: any) {
@@ -633,13 +720,13 @@ export class UsersController {
           today,
           true
         );
-        return response.status(HttpStatus.OK).json({
-          message: "Get Users successfully",
-          totalUser: totalUser,
-          totalKYCUser: totalKYCUser,
-          sinceLastWeekUserCount: sinceLastWeekUserCount,
-          sinceLastWeekKYCUserCount: sinceLastWeekKYCUserCount,
-        });
+      return response.status(HttpStatus.OK).json({
+        message: "Get Users successfully",
+        totalUser: totalUser,
+        totalKYCUser: totalKYCUser,
+        sinceLastWeekUserCount: sinceLastWeekUserCount,
+        sinceLastWeekKYCUserCount: sinceLastWeekKYCUserCount,
+      });
     } catch (err) {
       return response.status(err.status).json(err.response);
     }
@@ -647,11 +734,11 @@ export class UsersController {
 
   /**
    * This Api endpoint is used to update account settings
-   * @param req 
-   * @param response 
-   * @param updateAccountSettingDto 
-   * @param address 
-   * @returns 
+   * @param req
+   * @param response
+   * @param updateAccountSettingDto
+   * @param address
+   * @returns
    */
   @SkipThrottle(false)
   @Put("/updateAccountSettings/:address")
@@ -663,8 +750,7 @@ export class UsersController {
   ) {
     try {
       let userDetails = await this.userService.getFindbyAddress(address);
-      if(!userDetails)
-      {
+      if (!userDetails) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "User not found.",
         });
@@ -674,7 +760,8 @@ export class UsersController {
       updateAccountSettingDto.email = updateAccountSettingDto.email.trim();
       updateAccountSettingDto.phone = updateAccountSettingDto.phone.trim();
       updateAccountSettingDto.city = updateAccountSettingDto.city.trim();
-      updateAccountSettingDto.res_address = updateAccountSettingDto.res_address.trim();
+      updateAccountSettingDto.res_address =
+        updateAccountSettingDto.res_address.trim();
 
       const UserId = userDetails._id.toString();
       if (
@@ -1209,7 +1296,10 @@ export class UsersController {
         }
 
         const currentDate = moment();
-        const parsedGivenDate = moment(updateAccountSettingDto.dob, "DD/MM/YYYY");
+        const parsedGivenDate = moment(
+          updateAccountSettingDto.dob,
+          "DD/MM/YYYY"
+        );
         if (parsedGivenDate.isAfter(currentDate)) {
           return response.status(HttpStatus.BAD_REQUEST).json({
             message: "Invalid Date Of Birth.",

@@ -1,20 +1,30 @@
 import { NestMiddleware, Injectable, HttpException, HttpStatus, Logger } from "@nestjs/common";
 import { NextFunction, Request, Response } from "express";
 import { TokenService } from "src/service/token/token.service";
+import { IAdmin } from "src/interface/admins.interface";
+import { Model } from "mongoose";
+import { InjectModel } from "@nestjs/mongoose";
 const jwtSecret = 'eplba'
 const jwt = require('jsonwebtoken');
 
 @Injectable()
 export class AuthenticateMiddleware implements NestMiddleware {
 	constructor(
-		private readonly tokenService: TokenService
+		private readonly tokenService: TokenService,
+		@InjectModel("admin") private adminModel: Model<IAdmin>,
 	){}
 
 	async use(req: Request, res: Response, next: NextFunction) {
 		try {
 			const authHeader = req.headers['authorization']
             const roleId = req.headers['roleid'];
-           
+			const userId = req.headers['userid'];
+			const ipAddress = req.headers['ipaddress'];
+
+			if (!ipAddress && Number(roleId) !== 3) {
+				throw new HttpException('Access denied: Unauthorized role and IP address combination.', HttpStatus.UNAUTHORIZED);
+			}
+
 			if (!authHeader || !roleId) {
 				throw new HttpException('Authorization Token or Role ID not found', HttpStatus.UNAUTHORIZED);
 			}
@@ -28,6 +38,16 @@ export class AuthenticateMiddleware implements NestMiddleware {
 			if (!isExistingToken && req.method !== "POST" && req.originalUrl !== "/login") {
 				return res.status(HttpStatus.UNAUTHORIZED).json({ message: "Authorization Token not valid."});
 			}
+            if(Number(roleId)===3){
+			    const adminData = await this.adminModel.findOne({
+					_id: userId, role_id: roleId, ipAddress: ipAddress
+				});
+				if (!adminData && req.method !== "POST" && req.originalUrl !== "/login") {
+					return res.status(HttpStatus.UNAUTHORIZED).json({ message: "Authorization Token not valid."});
+				}
+			}
+			
+
 			jwt.verify(token, jwtSecret, (err, authData) => {
 				if (err) {
 					console.log(err);

@@ -1,13 +1,14 @@
 import { Document } from "mongoose";
 
 export interface ITransaction extends Document {
-  readonly transactionHash: string;
+    readonly transactionHash: string;
     readonly status: string;
     readonly user_wallet_address: string;
     readonly receiver_wallet_address: string;
     readonly network: string;
     readonly price_currency: string;
     readonly is_sale: boolean;
+    readonly is_process: boolean;
     readonly price_amount: string;
     readonly token_cryptoAmount : string;
     readonly gasUsed : string;
@@ -21,3 +22,4 @@ export interface ITransaction extends Document {
     readonly sale_name: string; 
     readonly sale_type: string;
 }
+
