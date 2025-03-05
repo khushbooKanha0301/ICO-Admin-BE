@@ -1,82 +1,64 @@
-import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose"
 @Schema()
 export class Transaction {
-  @Prop()
-  tran_id: number;
+	@Prop()
+	transactionHash: string;
 
-  @Prop()
-  status: string;
+	@Prop()
+	status: string;
 
-  @Prop()
-  title: string;
+	@Prop()
+	user_wallet_address: string;
 
-  @Prop()
-  do_not_convert: boolean;
+	@Prop()
+	receiver_wallet_address: string;
 
-  @Prop()
-  orderable_type: string;
+	@Prop()
+	network: string;
+	
+	@Prop()
+	price_currency: string;
 
-  @Prop()
-  orderable_id: number;
+	@Prop()
+	is_sale: boolean;
 
-  @Prop()
-  price_currency: string;
+	@Prop()
+	is_process: boolean;
 
-  @Prop()
-  price_amount: string;
+	@Prop()
+	price_amount: string;
 
-  @Prop()
-  lightning_network: boolean;
+	@Prop()
+	token_cryptoAmount: string;
 
-  @Prop()
-  receive_currency: string;
+	@Prop()
+	gasUsed: string;
 
-  @Prop()
-  receive_amount: string;
+	@Prop()
+	effectiveGasPrice: string;
 
-  @Prop()
-  created_at: string;
+	@Prop()
+	cumulativeGasUsed: string;
+	
+	@Prop()
+	blockNumber: string;
 
-  @Prop()
-  order_id: string;
+	@Prop()
+	blockHash: string;
 
-  @Prop()
-  payment_url: string;
+	@Prop()
+	created_at: string;
+	
+	@Prop()
+	paid_at: string;
 
-  @Prop()
-  underpaid_amount: number;
+	@Prop()
+	source: string;
 
-  @Prop()
-  overpaid_amount: string;
+	@Prop()
+	sale_name: string;
 
-  @Prop()
-  is_refundable: boolean;
-
-  @Prop()
-  refunds: string[];
-
-  @Prop()
-  voids: string[];
-
-  @Prop()
-  fees: string[];
-
-  @Prop()
-  token: string;
-
-  @Prop({ default: "Pending" })
-  transaction_status: string;
-
-  @Prop()
-  wallet_address: string;
-
-  @Prop()
-  token_cryptoAmount: string;
-
-  @Prop()
-  source: string;
-
-  @Prop()
-  paid_at: string;
-}
+	@Prop()
+	sale_type: string;
+}	
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);

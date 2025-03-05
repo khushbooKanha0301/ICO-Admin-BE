@@ -10,14 +10,17 @@ import { UpdateKycDataDto } from "src/dto/update-kyc.dto";
 
 @Injectable()
 export class UserService {
+  
   constructor(
     @InjectModel("user") private userModel: Model<IUser>,
     private configService: ConfigService
   ) {}
+
   async createUser(CreateUserDto: CreateUserDto): Promise<IUser> {
     const newUser = await new this.userModel(CreateUserDto);
     return newUser.save();
   }
+
   async updateUser(
     userId: string,
     body: UpdateUserProfileDto,
@@ -151,12 +154,15 @@ export class UserService {
     }
     return existingUser;
   }
+
   async getFindbyAddress(address: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
-      .findOne({ wallet_address: address })
+      .findOne({ wallet_address: caseInsensitiveAddress })
       .exec();
     return existingUser;
   }
+
   async deleteUser(userId: string): Promise<IUser> {
     const deletedUser = await this.userModel.findByIdAndDelete(userId);
     if (!deletedUser) {
@@ -164,23 +170,28 @@ export class UserService {
     }
     return deletedUser;
   }
+
   async getAllUsersExceptAuth(userId: string): Promise<any> {
     const allUsers = await this.userModel.find();
     const existingUser = allUsers.filter((user) => user.id !== userId);
     return existingUser;
   }
+
   async getUserDetailByAddress(address: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
-      .findOne({ wallet_address: address })
+      .findOne({ wallet_address: caseInsensitiveAddress })
       .exec();
     if (!existingUser) {
       throw new NotFoundException(`Address #${address} not found`);
     }
     return existingUser;
   }
+
   async getOnlyUserBioByAddress(address: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
-      .findOne({ wallet_address: address })
+      .findOne({ wallet_address: caseInsensitiveAddress })
       .select("-_id -nonce -__v")
       .exec();
     if (!existingUser) {
@@ -270,6 +281,7 @@ export class UserService {
     const count = await userQuery.countDocuments();
     return count;
   }
+
   async getUsers(
     page?: number,
     pageSize?: number,
@@ -462,6 +474,7 @@ export class UserService {
     const count = await userQuery.countDocuments({ kyc_completed: true });
     return count;
   }
+
   async getKycUsers(
     page?: number,
     pageSize?: number,
@@ -575,6 +588,7 @@ export class UserService {
     }
     return users;
   }
+
   async sinceLastWeekUserCount(
     startDate: string,
     endDate: string,
@@ -598,5 +612,27 @@ export class UserService {
       });
     }
     return usercount ? usercount : 0;
+  }
+
+  async getFindbyId(userId: string): Promise<any>{
+    const existingUser = await this.userModel
+    .findById(userId)
+    .select("_id email email_verified")
+    .exec();
+    if(existingUser){
+      return existingUser
+    }
+    return [];
+  }
+
+  async getFindbyEmail(email: string): Promise<any>{
+    const existingUser = await this.userModel
+    .findOne({email})
+    .select("_id email email_verified")
+    .exec();
+    if(existingUser){
+      return existingUser
+    }
+    return [];
   }
 }

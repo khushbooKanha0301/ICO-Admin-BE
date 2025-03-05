@@ -1,10 +1,12 @@
 import { Document } from "mongoose";
+
 export interface IUser extends Document {
   readonly fname: string;
   readonly lname: string;
   readonly dob: string;
   readonly fullname: string;
   readonly email: string;
+  readonly email_verified: boolean;
   readonly phone: string;
   readonly phoneCountry: string;
   readonly currentpre: string;
@@ -32,4 +34,9 @@ export interface IUser extends Document {
   is_2FA_enabled: boolean;
   is_2FA_login_verified: boolean;
   google_auth_secret: string;
+  is_2FA_SMS_enabled: boolean;
+  is_2FA_twilio_login_verified: boolean;
+  otpCreatedAt: string;
+  otpExpiresAt: string;
+  twilioOTP: string;
 }

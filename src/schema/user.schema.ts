@@ -1,7 +1,8 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { integer } from "aws-sdk/clients/cloudfront";
+
 @Schema()
 export class User {
+
   @Prop()
   fname: string;
   @Prop()
@@ -52,6 +53,8 @@ export class User {
   passport_url: string;
   @Prop()
   user_photo_url: string;
+  @Prop({ default: false })
+  email_verified: boolean;
   @Prop({ default: 0 })
   is_verified: number;
   @Prop({ default: false })
@@ -68,5 +71,16 @@ export class User {
   is_2FA_login_verified: boolean;
   @Prop()
   google_auth_secret: string;
+  @Prop()
+	twilioOTP: string;
+  @Prop()
+	otpCreatedAt: string;
+	@Prop()
+	otpExpiresAt: string;
+  @Prop({ default: true })
+	is_2FA_twilio_login_verified: boolean;
+  @Prop({ default: false })
+	is_2FA_SMS_enabled: boolean;
 }
+
 export const UserSchema = SchemaFactory.createForClass(User);

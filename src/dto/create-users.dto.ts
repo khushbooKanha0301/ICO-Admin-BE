@@ -1,5 +1,4 @@
 import { IsOptional, IsString } from "class-validator";
-
 export class CreateUserDto {
   @IsOptional()
   @IsString()
@@ -73,4 +72,24 @@ export class CreateUserDto {
 
   @IsOptional()
   is_2FA_enabled: boolean;
+
+  @IsOptional()
+	@IsString()
+	twilioOTP: string;
+
+	@IsOptional()
+	@IsString()
+	otpCreatedAt: string;
+
+	@IsOptional()
+	@IsString()
+	otpExpiresAt: string;
+
+	@IsOptional()
+	@IsString()
+	is_2FA_twilio_login_verified: boolean; 
+
+	@IsOptional()
+	@IsString()
+	is_2FA_SMS_enabled: boolean;
 }

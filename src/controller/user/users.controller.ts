@@ -12,29 +12,40 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { UserService } from "src/service/user/users.service";
+import { TransactionsService } from "src/service/transaction/transactions.service";
 import { ConfigService } from "@nestjs/config";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 import { IUser } from "src/interface/users.interface";
-import { MailerService } from "@nestjs-modules/mailer";
 import { IAdmin } from "src/interface/admins.interface";
 import { ITransaction } from "src/interface/transactions.interface";
 import { UpdateAccountSettingsDto } from "src/dto/update-account-settings.dto";
 import { SkipThrottle } from "@nestjs/throttler";
+import { ISales } from "src/interface/sales.interface";
+import { EmailService } from "src/service/email/email.service";
 const moment = require("moment");
 const rp = require("request-promise-native");
+
 @SkipThrottle()
 @Controller("users")
 export class UsersController {
   constructor(
     private readonly userService: UserService,
+    private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly transactionService: TransactionsService,
     @InjectModel("user") private userModel: Model<IUser>,
-    private readonly mailerService: MailerService,
+    @InjectModel("sales") private salesModel: Model<ISales>,
     @InjectModel("admin") private adminModel: Model<IAdmin>,
     @InjectModel("transaction") private transactionModel: Model<ITransaction>
   ) {}
 
+  /**
+   * This API endpoint is used to retrives all the user list
+   * @param req
+   * @param response
+   * @returns
+   */
   @Get("/userList")
   async userList(@Req() req: any, @Res() response) {
     try {
@@ -119,6 +130,12 @@ export class UsersController {
     }
   }
 
+  /**
+   * This API endpoint is used to retrives all the KYC user list
+   * @param req
+   * @param response
+   * @returns
+   */
   @Get("/kycUserList")
   async kycUserList(@Req() req: any, @Res() response) {
     try {
@@ -152,104 +169,182 @@ export class UsersController {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
-  
+
+  /**
+   * This API endpoint is used to accept the kyc
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @SkipThrottle(false)
   @Get("/acceptKyc/:id")
-  async acceptKyc(
-    @Req() req: any,
-    @Res() response,
-    @Param() param: { id: string }
-  ) {
+  async acceptKyc(@Res() response, @Param("id") id: string) {
     try {
-      let currentDate = moment.utc().format();
-      const userData = await this.userModel.findById(param.id);
-      if (!userData) {
-        throw new NotFoundException(`KYC not found`);
+      const currentDate = moment.utc().format();
+      // Fetch user data
+      const userData = await this.userModel.findById(id);
+      if (!userData) throw new NotFoundException("User not found");
+      if (userData.is_kyc_deleted)
+        throw new BadRequestException("KYC not found");
+      if (userData.is_verified === 1)
+        throw new BadRequestException("User KYC already approved");
+      if (userData.is_verified === 2)
+        throw new BadRequestException("User KYC already rejected");
+
+      // Update KYC status
+      await this.userModel.updateOne(
+        { _id: id },
+        { is_verified: 1, admin_checked_at: currentDate }
+      );
+
+      // Check and send verification email
+      if (
+        userData.email &&
+        userData.email_verified &&
+        userData.is_verified == 1
+      ) {
+        const globalContext = {
+          formattedDate: moment().format("dddd, MMMM D, YYYY"),
+          greeting: `Dear ${
+            userData.fname ? userData.fname + " " + userData.lname : "John Doe"
+          },`,
+          heading: "KYC Approved Email",
+          para1: "Thank you for submitting your verification request.",
+          para2:
+            "We are pleased to let you know that your identity (KYC) has been verified and you are granted to participate in our token sale.",
+          para3:
+            "We invite you to get back to contributor account and purchase token before sales end.",
+          title: "KYC Approved Email",
+        };
+        const mailSubject = "Middn :: KYC Verified : Contribute";
+        await this.emailService.sendVerificationEmail(
+          userData,
+          globalContext,
+          mailSubject
+        );
       }
-      if(userData?.is_kyc_deleted)
-      {
-        throw new BadRequestException("KYC not found")
+
+      // Update transaction and sales data
+      if (userData.kyc_completed && userData.is_verified === 1) {
+        const midCountResult =
+          await this.transactionService.getTotalMidByAddress(
+            userData.wallet_address
+          );
+        if (midCountResult) {
+          const currentSales = await this.transactionService.getCurrentSales();
+          const userPurchaseMid = parseFloat(
+            (midCountResult + (currentSales?.user_purchase_token || 0)).toFixed(
+              2
+            )
+          );
+          const remainingMid = parseFloat(
+            (currentSales?.total_token || 0 - userPurchaseMid).toFixed(2)
+          );
+          await this.salesModel.updateOne(
+            { _id: currentSales?._id },
+            {
+              $set: {
+                user_purchase_token: userPurchaseMid,
+                remaining_token: remainingMid,
+              },
+            }
+          );
+
+          await this.transactionModel.updateOne(
+            { user_wallet_address: userData.wallet_address },
+            { is_process: true }
+          );
+        }
       }
-      if(userData?.is_verified === 1)
-      {
-        throw new BadRequestException("User's KYC already Approved");
-      }
-      if (userData?.is_verified === 2) {
-        throw new BadRequestException("User's KYC already Rejected");
-      }
-      const users = await this.userModel
-        .updateOne(
-          { _id: param.id },
-          { is_verified: 1, admin_checked_at: currentDate }
-        )
-        .exec();
-      if (!users) {
-        throw new NotFoundException(`Users not found`);
-      }
+
       return response.status(HttpStatus.OK).json({
-        message: "User found successfully",
-        users: users,
+        message: "KYC approved successfully",
       });
-    } catch (err) {
-      return response.status(HttpStatus.BAD_REQUEST).json(err.response);
+    } catch (error) {
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        message: error.message || "Failed to approve KYC",
+      });
     }
   }
 
+  /**
+   *  This API endpoint is used to reject kyc
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @SkipThrottle(false)
   @Post("/rejectKyc/:id")
-  async rejectKyc(
-    @Req() req: any,
-    @Res() response,
-    @Param() param: { id: string }
-  ) {
+  async rejectKyc(@Req() req: any, @Res() response, @Param("id") id: string) {
     try {
-      const user = await this.userModel.findById(param.id).exec();
-      if (!user) {
-        throw new NotFoundException(`KYC not found`);
-      }
-      if(user?.is_kyc_deleted)
-      {
-        throw new BadRequestException("KYC not found")
-      }
-      if(user?.is_verified === 1)
-      {
-        throw new BadRequestException("User's KYC already Approved");
-      }
-      if (user?.is_verified === 2) {
-        throw new BadRequestException("User's KYC already Rejected");
-      }
-      let currentDate = moment.utc().format();
-      const users = await this.userModel
-        .updateOne(
-          { _id: param.id },
-          { is_verified: 2, admin_checked_at: currentDate }
-        )
-        .exec();
-      if (user.email) {
-        this.mailerService.sendMail({
-          to: user?.email,
-          subject: "Middn :: Your KYC has been rejected",
-          template: "message",
-          context: {
-            title: "Sorry !!! Your KYC has been Rejected",
-            message: req.body.message ? req.body.message : "Reason not added",
-          },
-        }).catch((error)=>{
-          console.log(error);
-        });
-      }
-      if (!users) {
+      const currentDate = moment.utc().format();
+      // Fetch user data
+      const user = await this.userModel.findById(id).exec();
+      if (!user) throw new NotFoundException("user not found");
+      if (user.is_kyc_deleted) throw new BadRequestException("KYC not found");
+      if (user.is_verified === 1)
+        throw new BadRequestException("User KYC already approved");
+      if (user.is_verified === 2)
+        throw new BadRequestException("User KYC already rejected");
+
+      // Update KYC status to "rejected"
+      await this.userModel.updateOne(
+        { _id: id },
+        { is_verified: 2, admin_checked_at: currentDate }
+      );
+
+      const updateData = await this.userModel.findById(id);
+      if (!updateData) {
         throw new NotFoundException(`Users not found`);
       }
+
+      // Send rejection email if email is verified
+      if (
+        updateData.email &&
+        updateData.email_verified &&
+        updateData.is_verified === 2
+      ) {
+        const globalContext = {
+          formattedDate: moment().format("dddd, MMMM D, YYYY"),
+          greeting: `Dear ${
+            user.fname ? `${user.fname} ${user.lname}` : "John Doe"
+          },`,
+          rejectionMessage: req.body.message || "Reason not added",
+          para1:
+            "Thank you for submitting your verification request. We're having difficulties verifying your identity.",
+          para2:
+            "The information you had submitted was unfortunately rejected for following reason:",
+          para3:
+            "Don't be upset! Still you want to verity your identity, please get back to your account and fill form with proper information and upload correct documents to complete your identity verification process.",
+          title: "KYC Rejected Email",
+        };
+        const mailSubject = "Middn :: KYC Application Rejected";
+        await this.emailService.sendVerificationEmail(
+          updateData,
+          globalContext,
+          mailSubject
+        );
+      }
+
       return response.status(HttpStatus.OK).json({
-        message: "User found successfully",
-        users: users,
+        message: "KYC rejection processed successfully",
       });
-    } catch (err) {
-      return response.status(HttpStatus.BAD_REQUEST).json(err.response);
+    } catch (error) {
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        message: error.message || "Failed to reject KYC",
+      });
     }
   }
 
+  /**
+   *  This API endpoint is used to Suspend user
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @SkipThrottle(false)
   @Post("/suspendUser/:id")
   async suspendUser(
@@ -258,6 +353,23 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
+      const userId = req.headers["userid"];
+      const fetchUser = await this.adminModel
+        .findOne({ _id: userId })
+        .select("id permissions role_id");
+
+      if (fetchUser?.role_id === 3) {
+        const hasPermission = fetchUser?.permissions?.some(
+          (permission) => permission.permission_id === 1
+        );
+
+        if (!hasPermission) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "You don't have permission to Suspend User",
+          });
+        }
+      }
+
       const user = await this.userModel.findById(param.id).exec();
       if (!user) {
         throw new NotFoundException(`User not found`);
@@ -277,6 +389,13 @@ export class UsersController {
     }
   }
 
+  /**
+   * This API endpoint is used to twoFA user disable
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @SkipThrottle(false)
   @Post("/twoFADisableUser/:id")
   async twoFADisableUser(
@@ -292,7 +411,7 @@ export class UsersController {
       if (user.is_2FA_enabled === false) {
         return response
           .status(HttpStatus.BAD_REQUEST)
-          .json({message:"This user's 2FA already disabled"});
+          .json({ message: "This user's 2FA already disabled" });
       }
       user.is_2FA_enabled = false;
       user.is_2FA_login_verified = true;
@@ -307,6 +426,13 @@ export class UsersController {
     }
   }
 
+  /**
+   * This Api endpoint is used to active user
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @SkipThrottle(false)
   @Post("/activeUser/:id")
   async activeUser(
@@ -335,6 +461,13 @@ export class UsersController {
     }
   }
 
+  /**
+   * This Api endpoint is used to delete user
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @SkipThrottle(false)
   @Get("/deleteUser/:id")
   async deleteUser(
@@ -343,14 +476,31 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
+      const userId = req.headers["userid"];
+      const fetchUser = await this.adminModel
+        .findOne({ _id: userId })
+        .select("id permissions role_id");
+
+      if (fetchUser?.role_id === 3) {
+        const hasPermission = fetchUser?.permissions?.some(
+          (permission) => permission.permission_id === 2
+        );
+
+        if (!hasPermission) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "You don't have permission to Delete User",
+          });
+        }
+      }
+
       const userData = await this.userModel.findById(param.id);
       if (!userData) {
         throw new NotFoundException(`User already Deleted`);
       }
-      const transaction = await this.transactionModel
+      await this.transactionModel
         .deleteMany({ wallet_address: userData?.wallet_address })
         .exec();
-      const user = await this.userModel.findByIdAndDelete(param.id).exec();
+      await this.userModel.findByIdAndDelete(param.id).exec();
 
       return response.status(HttpStatus.OK).json({
         message: "User deleted successfully...",
@@ -360,6 +510,13 @@ export class UsersController {
     }
   }
 
+  /**
+   * This Api endpoint is used to delete KYC.
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @SkipThrottle(false)
   @Get("/deleteKyc/:id")
   async deleteKyc(
@@ -368,14 +525,32 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
-      const userData = await this.userModel.findById(param.id);
-      if(!userData)
-      {
-        throw new NotFoundException(`KYC not found`);
+      const userId = req.headers["userid"];
+      const fetchUser = await this.adminModel
+        .findOne({ _id: userId })
+        .select("id permissions role_id");
+
+      if (fetchUser?.role_id === 3) {
+        const hasPermission = fetchUser?.permissions?.some(
+          (permission) => permission.permission_id === 3
+        );
+
+        if (!hasPermission) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "You don't have permission to Delete User KYC",
+          });
+        }
       }
+
+      const userData = await this.userModel.findById(param.id);
+      if (!userData) {
+        throw new NotFoundException(`KYC Not Found`);
+      }
+
       if (userData?.is_kyc_deleted === true) {
         throw new BadRequestException(`User's KYC already deleted`);
       }
+
       const user = await this.userModel
         .findByIdAndUpdate(
           param.id,
@@ -409,6 +584,13 @@ export class UsersController {
     }
   }
 
+  /**
+   * This Api endpoint is used to view users
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @Get("/viewUser/:id")
   async viewUser(
     @Req() req: any,
@@ -416,7 +598,13 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
-      const user = await this.userModel.findById(param.id).select("-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret").exec();
+      const user = await this.userModel
+        .findById(param.id)
+        .select(
+          "-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret"
+        )
+        .exec();
+
       if (!user) {
         throw new NotFoundException(`User not found`);
       }
@@ -452,6 +640,13 @@ export class UsersController {
     }
   }
 
+  /**
+   * This Api endpoint is used to view KYC by id
+   * @param req
+   * @param response
+   * @param param
+   * @returns
+   */
   @Get("/viewKyc/:id")
   async viewKyc(
     @Req() req: any,
@@ -459,7 +654,12 @@ export class UsersController {
     @Param() param: { id: string }
   ) {
     try {
-      const user = await this.userModel.findById(param.id).select("-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret").exec();
+      const user = await this.userModel
+        .findById(param.id)
+        .select(
+          "-referred_by -wallet_type -nonce -is_2FA_login_verified -__v -google_auth_secret"
+        )
+        .exec();
       if (!user) {
         throw new NotFoundException(`KYC not found`);
       }
@@ -498,6 +698,12 @@ export class UsersController {
     }
   }
 
+  /**
+   * This Api endpoint is used to reset password
+   * @param response
+   * @param req
+   * @returns
+   */
   @Post("/changePassword")
   async resetPassword(@Res() response, @Req() req: any) {
     try {
@@ -524,6 +730,12 @@ export class UsersController {
     }
   }
 
+  /**
+   * This Api endpoint is used to get users count
+   * @param response
+   * @param req
+   * @returns
+   */
   @Get("/getUsersCount")
   async getUsersCount(@Res() response, @Req() req: any) {
     try {
@@ -531,12 +743,13 @@ export class UsersController {
       const totalKYCUser = await this.userModel
         .countDocuments({ kyc_completed: true })
         .exec();
-      var today = moment.utc().format();
-      var lastWeekStartDate = moment
+      const today = moment.utc().format();
+      const lastWeekStartDate = moment
         .utc()
         .subtract(1, "weeks")
         .startOf("week")
         .format();
+
       const sinceLastWeekUserCount =
         await this.userService.sinceLastWeekUserCount(lastWeekStartDate, today);
       const sinceLastWeekKYCUserCount =
@@ -545,17 +758,26 @@ export class UsersController {
           today,
           true
         );
-        return response.status(HttpStatus.OK).json({
-          message: "Get Users successfully",
-          totalUser: totalUser,
-          totalKYCUser: totalKYCUser,
-          sinceLastWeekUserCount: sinceLastWeekUserCount,
-          sinceLastWeekKYCUserCount: sinceLastWeekKYCUserCount,
-        });
+      return response.status(HttpStatus.OK).json({
+        message: "Get Users successfully",
+        totalUser: totalUser,
+        totalKYCUser: totalKYCUser,
+        sinceLastWeekUserCount: sinceLastWeekUserCount,
+        sinceLastWeekKYCUserCount: sinceLastWeekKYCUserCount,
+      });
     } catch (err) {
       return response.status(err.status).json(err.response);
     }
   }
+
+  /**
+   * This Api endpoint is used to update account settings
+   * @param req
+   * @param response
+   * @param updateAccountSettingDto
+   * @param address
+   * @returns
+   */
   @SkipThrottle(false)
   @Put("/updateAccountSettings/:address")
   async updateAccountSettings(
@@ -565,30 +787,33 @@ export class UsersController {
     @Param("address") address: string
   ) {
     try {
-      let userDetails = await this.userService.getFindbyAddress(address);
-      if(!userDetails)
-      {
+      const userDetails = await this.userService.getFindbyAddress(address);
+      if (!userDetails) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "User not found.",
         });
       }
-      updateAccountSettingDto.fname = updateAccountSettingDto.fname.trim();
-      updateAccountSettingDto.lname = updateAccountSettingDto.lname.trim();
-      updateAccountSettingDto.email = updateAccountSettingDto.email.trim();
-      updateAccountSettingDto.phone = updateAccountSettingDto.phone.trim();
-      updateAccountSettingDto.city = updateAccountSettingDto.city.trim();
-      updateAccountSettingDto.res_address = updateAccountSettingDto.res_address.trim();
 
-      const UserId = userDetails._id.toString();
+      const userId = userDetails._id.toString();
+
+      // Trim all input fields
+      Object.keys(updateAccountSettingDto).forEach((key) => {
+        if (typeof updateAccountSettingDto[key] === "string") {
+          updateAccountSettingDto[key] = updateAccountSettingDto[key].trim();
+        }
+      });
+
+      // Validate phone number
       if (
         updateAccountSettingDto.phone &&
-        !updateAccountSettingDto.phone.match("^[0-9]{5,10}$")
+        !/^[0-9]{5,10}$/.test(updateAccountSettingDto.phone)
       ) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Invalid Phone.",
         });
       }
 
+      // Validate country
       const countries = [
         "AF",
         "AL",
@@ -840,18 +1065,47 @@ export class UsersController {
         });
       }
 
-      let validRegex =
-        /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
-      if (
-        updateAccountSettingDto.email &&
-        !updateAccountSettingDto.email.match(validRegex)
-      ) {
-        return response.status(HttpStatus.BAD_REQUEST).json({
-          message: "Invalid E-mail address.",
-        });
+      // Validate email
+      if (updateAccountSettingDto.email) {
+        const emailRegex =
+          /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
+        if (!emailRegex.test(updateAccountSettingDto.email)) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "Invalid E-mail address.",
+          });
+        }
+
+        // Check email existence
+        const existingUser = await this.userService.getFindbyEmail(
+          updateAccountSettingDto.email
+        );
+        if (
+          existingUser &&
+          existingUser._id &&
+          existingUser._id.toString() !== userId
+        ) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "Email already exists.",
+          });
+        }
+
+        // Check if the email is being updated and is verified
+        const userEmailCheck = await this.userService.getFindbyId(userId);
+        // If the email is verified and the user is trying to change it
+        if (
+          userEmailCheck &&
+          userEmailCheck.email_verified &&
+          userEmailCheck.email !== updateAccountSettingDto.email
+        ) {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message:
+              "Your email address is already verified and cannot be changed.",
+          });
+        }
       }
 
-      const countryCode = [
+      // Validate phone country code
+      const countryCodes = [
         "+93",
         "+355",
         "+213",
@@ -1095,37 +1349,73 @@ export class UsersController {
       ];
       if (
         updateAccountSettingDto.phoneCountry &&
-        !countryCode.includes(updateAccountSettingDto.phoneCountry)
+        !countryCodes.includes(updateAccountSettingDto.phoneCountry)
       ) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Invalid country code.",
         });
       }
 
+      // Validate date of birth
       if (updateAccountSettingDto.dob) {
-        if (
-          !moment(updateAccountSettingDto.dob, "DD/MM/YYYY", true).isValid()
-        ) {
-          return response.status(HttpStatus.BAD_REQUEST).json({
-            message: "Invalid Date Of Birth.",
-          });
-        }
-
-        const currentDate = moment();
-        const parsedGivenDate = moment(updateAccountSettingDto.dob, "DD/MM/YYYY");
-        if (parsedGivenDate.isAfter(currentDate)) {
+        const dob = moment(updateAccountSettingDto.dob, "DD/MM/YYYY", true);
+        if (!dob.isValid() || dob.isAfter(moment())) {
           return response.status(HttpStatus.BAD_REQUEST).json({
             message: "Invalid Date Of Birth.",
           });
         }
       }
 
+      // Update user account settings
       await this.userService.updateAccountSettings(
-        UserId,
+        userId,
         updateAccountSettingDto
       );
+
       return response.status(HttpStatus.OK).json({
-        message: "Users has been successfully updated.",
+        message: "User has been successfully updated.",
+      });
+    } catch (err) {
+      console.error("Error updating account settings: ", err);
+      return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        message: "An error occurred while updating account settings.",
+      });
+    }
+  }
+  /**
+   * Disables Two-Factor Authentication (2FA) for a user by their ID.
+   * @param req 
+   * @param response 
+   * @param param 
+   * @returns 
+   */
+  @SkipThrottle(false)
+  @Post("/twoFASMSDisableUser/:id")
+  async twoFASMSDisableUser(
+    @Req() req: any,
+    @Res() response,
+    @Param() param: { id: string }
+  ) {
+    try {
+      const user = await this.userModel.findById(param.id).exec();
+      if (!user) {
+        throw new NotFoundException(`User #${param.id} not found`);
+      }
+      if (user.is_2FA_SMS_enabled === false) {
+        return response
+          .status(HttpStatus.BAD_REQUEST)
+          .json({message:"This user's SMS 2FA already disabled"});
+      }
+      user.is_2FA_SMS_enabled = false;
+      user.is_2FA_twilio_login_verified = true;
+      user.twilioOTP = null;
+      user.otpCreatedAt = null;
+      user.otpExpiresAt = null;
+      await user.save();
+      const userObj = await this.userService.getUser(param.id);
+      return response.status(HttpStatus.OK).json({
+        message: "User's SMS 2FA Disabled successfully",
+        User: userObj,
       });
     } catch (err) {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);

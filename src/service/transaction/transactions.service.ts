@@ -2,14 +2,15 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { ITransaction } from "src/interface/transactions.interface";
 import { Model } from "mongoose";
-import { ConfigService } from "@nestjs/config";
 import * as moment from "moment";
+import { ISales } from "src/interface/sales.interface";
 
 @Injectable()
 export class TransactionsService {
+  
   constructor(
     @InjectModel("transaction") private transactionModel: Model<ITransaction>,
-    private configService: ConfigService
+    @InjectModel("sales") private salesModel: Model<ISales>
   ) {}
 
   async getTransaction(
@@ -29,7 +30,7 @@ export class TransactionsService {
         transactionsQuery = transactionsQuery.where({
           $expr: {
             $regexMatch: {
-              input: { $toString: "$tran_id" },
+              input: { $toString: "$transactionHash" },
               regex: regexQuery,
               options: "i",
             },
@@ -41,22 +42,21 @@ export class TransactionsService {
     if (statusFilter !== "All" && statusFilter !== null) {
       transactionsQuery = transactionsQuery.where({ status: statusFilter });
     }
-
     if (types && types.length > 0) {
       transactionsQuery = transactionsQuery.where({ source: { $in: types } });
     }
     if (status && status.length > 0) {
       transactionsQuery = transactionsQuery.where({ status: { $in: status } });
     }
+    
     if (page && pageSize) {
       const skipCount = (page - 1) * pageSize;
       transactionsQuery = transactionsQuery.skip(skipCount).limit(pageSize);
     }
 
     const transactions = await transactionsQuery
-      .select("-__v -do_not_convert -orderable_type -wallet_address -lightning_network -underpaid_amount -overpaid_amount -is_refundable -refunds -voids -fees -payment_url -token -orderable_id")
-      .sort({ created_at: "desc" })
-      .exec();
+    .sort({ created_at: "desc" })
+    .exec();
 
     if (!transactions) {
       throw new NotFoundException(`Transactions not found`);
@@ -64,9 +64,12 @@ export class TransactionsService {
 
     return transactions;
   }
+
   async getTransactionByWalletAdd(address?: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
+
     let transactionsQuery = this.transactionModel.find({
-      wallet_address: address,
+      user_wallet_address: caseInsensitiveAddress
     });
 
     const transactions = await transactionsQuery.exec();
@@ -83,6 +86,8 @@ export class TransactionsService {
         {
           $match: {
             status: "paid",
+            is_sale: true,
+            is_process : true
           },
         },
         {
@@ -101,28 +106,87 @@ export class TransactionsService {
   }
 
   async getTotalMid() {
-    const midCountResult = await this.transactionModel
-      .aggregate([
-        {
-          $match: {
-            status: {
-              $in: ["new", "paid", "pending", "confirming"],
-            },
-          },
+    const midCountResult = await this.transactionModel.aggregate([
+      {
+        $match: {
+          status: "paid",
+          is_sale: true,
+          is_process: true
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $toDouble: "$token_cryptoAmount" }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $round: ["$total", 2] },
         },
-        {
-          $group: {
-            _id: null,
-            total: {
-              $sum: { $toDouble: "$token_cryptoAmount" },
-            },
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $first: "$totalAmount" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $ifNull: ["$totalAmount", 0] }
+        }
+      }
+    ]).exec();
+  
+    return (midCountResult && midCountResult[0]?.totalAmount)? midCountResult[0].totalAmount: 0;
+  }
+
+  async getTotalMidByAddress(address: string) {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
+    const midCountResult = await this.transactionModel.aggregate([
+      {
+        $match: {
+          status: "paid",
+          is_sale: true,
+          sale_type: "outside-website",
+          is_process: false,
+          user_wallet_address: caseInsensitiveAddress
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $toDouble: "$token_cryptoAmount" }
           },
+
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $round: ["$total", 2] },
         },
-      ])
-      .exec();
-    return midCountResult && midCountResult[0]?.total
-      ? midCountResult[0]?.total
-      : 0;
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $first: "$totalAmount" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $ifNull: ["$totalAmount", 0] }
+        }
+      }
+    ]).exec();
+  
+    return (midCountResult && midCountResult[0]?.totalAmount)? midCountResult[0].totalAmount: 0;
   }
 
   async getTransactionCount(
@@ -141,7 +205,7 @@ export class TransactionsService {
         transactionsQuery = transactionsQuery.where({
           $expr: {
             $regexMatch: {
-              input: { $toString: "$tran_id" },
+              input: { $toString: "$transactionHash" },
               regex: regexQuery,
               options: "i",
             },
@@ -159,37 +223,35 @@ export class TransactionsService {
     if (types && types.length > 0) {
       transactionsQuery = transactionsQuery.where({ source: { $in: types } });
     }
-
+    
     const count = await transactionsQuery.countDocuments();
     return count;
   }
-  async getTransactionByOredrId(orderId): Promise<any> {
+
+  async getTransactionByOredrId(orderId: string): Promise<any> {
     const transaction = this.transactionModel
-      .findOne({ tran_id: orderId })
+    .findOne({ transactionHash: orderId })
       .exec();
     return transaction;
   }
 
   async getSaleGraphValue(
-    address,
     filterType: any,
     from_date: any,
     to_date: any
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
+   
     const transactions = await this.transactionModel
       .aggregate([
         {
@@ -201,6 +263,7 @@ export class TransactionsService {
               $dateToString: {
                 format:
                   filterType === "thisWeekDate" ||
+                  filterType === "thisMonthDate" ||
                   filterType === "lastWeek" ||
                   filterType === "lastMonth"
                     ? "%Y-%m-%d"
@@ -283,6 +346,25 @@ export class TransactionsService {
         mainDates.push(formattedMonth);
       }
     }
+    if (filterType === "thisMonthDate") {
+      // Calculate dates for the current month
+      const thisMonthStart = moment().startOf("month");
+      const thisMonthEnd = moment().endOf("month");
+
+      let currentDatePointer = thisMonthStart.clone();
+      while (currentDatePointer.isSameOrBefore(thisMonthEnd, "day")) {
+        mainDates.push(currentDatePointer.format("YYYY-MM-DD"));
+        currentDatePointer.add(1, "day");
+      }
+    } 
+    if (filterType === "thisYearDate") {
+      const currentYear = moment().year()
+      for (let i = 0; i < 12; i++) {
+        const thisMonth = moment().year(currentYear).month(i)
+        const formattedMonth = thisMonth.format('YYYY-MM')
+        mainDates.push(formattedMonth)
+      }
+    }
 
     let data = transactions?.map((trans) => {
       let key = trans.label;
@@ -301,24 +383,20 @@ export class TransactionsService {
   }
 
   async getLineGraphTotalToken(
-    address: any,
     from_date: any,
     to_date: any
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
 
     let totalToken = await this.transactionModel
       .aggregate([
@@ -327,7 +405,7 @@ export class TransactionsService {
         },
         {
           $group: {
-            _id: address ? "$wallet_address" : null,
+            _id: null,
             totalToken: { $sum: 1 },
           },
         },
@@ -339,25 +417,21 @@ export class TransactionsService {
   }
 
   async getLineGraphValue(
-    address,
     filterType: any,
     from_date: any,
     to_date: any
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
     const transactions = await this.transactionModel
       .aggregate([
         {
@@ -369,6 +443,7 @@ export class TransactionsService {
               $dateToString: {
                 format:
                   filterType === "thisWeekDate" ||
+                  filterType === "thisMonthDate" ||
                   filterType === "lastWeek" ||
                   filterType === "lastMonth"
                     ? "%Y-%m-%d"
@@ -449,6 +524,26 @@ export class TransactionsService {
         mainDates.push(formattedMonth);
       }
     }
+    if (filterType === "thisMonthDate") {
+      // Calculate dates for the current month
+      const thisMonthStart = moment().startOf("month");
+      const thisMonthEnd = moment().endOf("month");
+
+      let currentDatePointer = thisMonthStart.clone();
+      while (currentDatePointer.isSameOrBefore(thisMonthEnd, "day")) {
+        mainDates.push(currentDatePointer.format("YYYY-MM-DD"));
+        currentDatePointer.add(1, "day");
+      }
+    } 
+    if (filterType === "thisYearDate") {
+      const currentYear = moment().year()
+      for (let i = 0; i < 12; i++) {
+        const thisMonth = moment().year(currentYear).month(i)
+        const formattedMonth = thisMonth.format('YYYY-MM')
+        mainDates.push(formattedMonth)
+      }
+    }
+
     let data = transactions?.map((trans) => {
       let key = trans.label;
       return { [key]: trans.value };
@@ -464,25 +559,22 @@ export class TransactionsService {
     });
     return result;
   }
+
   async getSaleGraphTotalToken(
-    address: any,
     from_date: any,
     to_date: any
   ): Promise<any> {
     let woToken: {
-      status: string;
+      status: string,
+      is_sale: boolean,
+      is_process: boolean,
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
-    if (address !== null) {
-      woToken = {
-        ...woToken,
-        wallet_address: address,
-      };
-    }
 
     let totalToken = await this.transactionModel
       .aggregate([
@@ -491,7 +583,7 @@ export class TransactionsService {
         },
         {
           $group: {
-            _id: address ? "$wallet_address" : null,
+            _id: null,
             totalToken: { $sum: 1 },
           },
         },
@@ -501,36 +593,58 @@ export class TransactionsService {
       totalToken.length && totalToken[0] ? totalToken[0].totalToken : 0;
     return totalToken;
   }
-  async getTokenCount(address?: string) {
+
+  async getTokenCount() {
     let whereQuery: {
       status: any;
-      wallet_address?: any;
+      is_sale: boolean;
+      is_process: boolean,
     } = {
-      status: {
-        $in: ["new", "paid", "pending", "confirming"],
-      },
+      status: "paid",
+      is_sale: true,
+      is_process: true
     };
-    if (address) {
-      whereQuery = {
-        ...whereQuery,
-        wallet_address: address,
-      };
-    }
-    const tokenCountResult = await this.transactionModel
-      .aggregate([
-        {
-          $match: whereQuery,
-        },
-        {
-          $group: {
-            _id: "$price_currency",
-            total: {
-              $sum: { $toDouble: "$token_cryptoAmount" },
-            },
-          },
-        },
-      ])
-      .exec();
+
+    const tokenCountResult = await this.transactionModel.aggregate([
+      {
+        $match:whereQuery
+      },
+      {
+        $group: {
+          _id: '$price_currency',
+          total: {
+            $sum: { $toDouble: "$token_cryptoAmount" }
+          }
+        }
+      },
+    ]).exec();
+    return tokenCountResult;
+  }
+
+  async getUsdtCount() {
+    let whereQuery: {
+      status: any;
+      is_sale: boolean;
+      is_process: boolean,
+    } = {
+      status: "paid",
+      is_sale: true,
+      is_process: true
+    };
+   
+    const tokenCountResult = await this.transactionModel.aggregate([
+      {
+        $match:whereQuery
+      },
+      {
+        $group: {
+          _id: '$price_currency',
+          total: {
+            $sum: { $toDouble: "$price_amount" }
+          }
+        }
+      },
+    ]).exec();
     return tokenCountResult;
   }
 
@@ -542,5 +656,30 @@ export class TransactionsService {
       },
     });
     return transactionCount ? transactionCount : 0;
+  }
+
+  async getSales(){
+    return await this.salesModel.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $toDouble: "$total_token" }
+          }
+        }
+      },
+    ]).exec();
+  }
+
+  async getCurrentSales() {
+    const currentDate = moment.utc().format();
+    return await this.salesModel
+      .findOne({
+        $and: [
+          { start_sale: { $lte: currentDate } },
+          { end_sale: { $gte: currentDate } },
+        ],
+      })
+    .exec();
   }
 }
